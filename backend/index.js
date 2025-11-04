@@ -20,7 +20,7 @@ const {authmiddleware} = require('./middleware/authmiddleware');
 // Security headers with Helmet (Basic protection)
 server.use(helmet());
 
-// Configure CORS to allow requests from your frontend domain
+// Configure CORS to allow requests from your frontend domainn
 server.use(cors({
   origin: ['http://localhost:5173', 'https://movieapp-1-9vz5.onrender.com', 'http://localhost'],
   credentials: true,
