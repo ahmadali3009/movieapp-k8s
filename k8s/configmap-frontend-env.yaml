@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-env
+  namespace: movieapp
+data:
+  APP_ENV: "production"
+  # API_URL will be set via backend service name
+  API_URL: "http://backend-service:5000"
+

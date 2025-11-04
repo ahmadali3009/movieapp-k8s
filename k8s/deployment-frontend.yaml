@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: movieapp
+  labels:
+    app: frontend
+spec:
+  replicas: 2  # Run 2 instances for high availability
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image:  ahmedbutt3009/movieapp-frontend:latest  # Replace with your image registry
+        # For local testing, you can use: imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-env
+              key: API_URL
+        - name: APP_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: frontend-env
+              key: APP_ENV
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+        - name: env-script
+          mountPath: /docker-entrypoint.d/40-env.sh
+          subPath: env.sh
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: env-script
+        configMap:
+          name: frontend-env-script
+
