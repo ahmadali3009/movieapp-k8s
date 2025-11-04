@@ -1,0 +1,127 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'k8s/**'
+      - 'Dockerfile'
+      - 'Dockerfile.frontend'
+      - 'backend/**'
+      - 'src/**'
+      - '.github/workflows/deploy-k8s.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  DOCKER_USERNAME: ahmedbutt3009
+  BACKEND_IMAGE: movieapp-backend
+  FRONTEND_IMAGE: movieapp-frontend
+  K8S_NAMESPACE: movieapp
+
+jobs:
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Verify cluster connection
+        run: kubectl cluster-info && kubectl get nodes
+
+      - name: Get image tags
+        id: image-tags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BACKEND_TAG="latest"
+            FRONTEND_TAG="latest"
+          else
+            BACKEND_TAG="${{ github.ref_name }}-${{ github.sha }}"
+            FRONTEND_TAG="${{ github.ref_name }}-${{ github.sha }}"
+          fi
+          echo "backend_tag=${{ env.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}:$BACKEND_TAG" >> $GITHUB_OUTPUT
+          echo "frontend_tag=${{ env.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}:$FRONTEND_TAG" >> $GITHUB_OUTPUT
+          echo "Backend image: ${{ env.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}:$BACKEND_TAG"
+          echo "Frontend image: ${{ env.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}:$FRONTEND_TAG"
+
+      - name: Update deployment images
+        run: |
+          # Update backend deployment
+          sed -i "s|image:.*movieapp-backend.*|image: ${{ steps.image-tags.outputs.backend_tag }}|g" k8s/deployment-backend.yaml
+          # Update frontend deployment
+          sed -i "s|image:.*movieapp-frontend.*|image: ${{ steps.image-tags.outputs.frontend_tag }}|g" k8s/deployment-frontend.yaml
+          # Set image pull policy to Always for production
+          sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" k8s/deployment-backend.yaml
+          sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" k8s/deployment-frontend.yaml
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply ConfigMaps
+        run: |
+          kubectl apply -f k8s/configmap-nginx.yaml
+          kubectl apply -f k8s/configmap-frontend-env.yaml
+          kubectl apply -f k8s/configmap-frontend-script.yaml
+
+      - name: Apply Secrets
+        run: |
+          kubectl apply -f k8s/secret-backend.yaml
+
+      - name: Deploy Backend
+        run: |
+          kubectl apply -f k8s/deployment-backend.yaml
+          kubectl apply -f k8s/service-backend.yaml
+
+      - name: Deploy Frontend
+        run: |
+          kubectl apply -f k8s/deployment-frontend.yaml
+          kubectl apply -f k8s/service-frontend.yaml
+
+      - name: Wait for deployments
+        run: |
+          kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n ${{ env.K8S_NAMESPACE }} || true
+          kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n ${{ env.K8S_NAMESPACE }} || true
+
+      - name: Show deployment status
+        run: |
+          echo "=== Pods Status ==="
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+          echo ""
+          echo "=== Services Status ==="
+          kubectl get services -n ${{ env.K8S_NAMESPACE }}
+          echo ""
+          echo "=== Deployments Status ==="
+          kubectl get deployments -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, rolling back..."
+          kubectl rollout undo deployment/backend-deployment -n ${{ env.K8S_NAMESPACE }} || true
+          kubectl rollout undo deployment/frontend-deployment -n ${{ env.K8S_NAMESPACE }} || true
+

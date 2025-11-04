@@ -38,7 +38,9 @@ Cineverse is a full-stack, AI-enhanced movie discovery platform built with the M
 ### DevOps & Deployment
 * **Docker & Docker Compose**: The entire application is containerized for seamless deployment across different environments.
 * **Nginx**: Used as a reverse proxy to handle requests and improve performance.
-* **Render/Netlify**: The application is configured for deployment on cloud platforms like Render and Netlify.
+* **Kubernetes**: Complete Kubernetes manifests for orchestrating containers in production.
+* **GitHub Actions**: Automated CI/CD pipeline for building, testing, and deploying the application.
+* **EC2**: Support for deploying to AWS EC2 instances.
 
 ---
 
@@ -76,6 +78,34 @@ Follow these steps to set up and run the project locally using Docker.
     ```
 
 The application will now be running and accessible through your local host.
+
+---
+
+## 🔄 CI/CD Pipeline
+
+This project includes automated CI/CD pipelines using GitHub Actions. The pipelines handle:
+
+- **Automated Testing**: Lint and build checks on every push/PR
+- **Docker Image Building**: Automatic building and pushing to Docker Hub
+- **Kubernetes Deployment**: Automated deployment to K8s clusters
+- **EC2 Deployment**: Manual deployment option for EC2 instances
+
+### Quick Setup
+
+1. **Configure GitHub Secrets** (required):
+   - `DOCKER_USERNAME`: Your Docker Hub username
+   - `DOCKER_PASSWORD`: Your Docker Hub password/token
+   - `KUBE_CONFIG`: Base64-encoded kubeconfig (for K8s deployment)
+   - `EC2_SSH_KEY`: SSH private key (for EC2 deployment)
+
+2. **Automatic Deployment**:
+   - Push to `main` branch → Automatically builds and deploys
+   - Pull requests → Runs tests and builds images
+
+3. **Manual Deployment**:
+   - Go to Actions tab → Select workflow → Run workflow
+
+For detailed setup instructions, see [`.github/workflows/README.md`](.github/workflows/README.md)
 
 ---
 
