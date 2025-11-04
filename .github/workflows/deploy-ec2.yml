@@ -37,8 +37,12 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
+          # Write key and normalize line endings
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          sed -i 's/\r$//' ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          # Verify key format
+          ssh-keygen -l -f ~/.ssh/deploy_key || (echo "⚠️  SSH key format issue - checking first line:" && head -1 ~/.ssh/deploy_key)
           ssh-keyscan -H ${{ github.event.inputs.ec2_host }} >> ~/.ssh/known_hosts
 
       - name: Create deployment script
