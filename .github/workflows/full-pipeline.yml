@@ -115,109 +115,101 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Copy k8s files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST || '16.16.89.200' }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "k8s/*"
+          target: "/tmp/movieapp-k8s/k8s"
+          strip_components: 0
 
-      - name: Set up SSH tunnel to EC2
-        run: |
-          mkdir -p ~/.ssh
-          # Write SSH key and normalize line endings
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key.pem
-          sed -i 's/\r$//' ~/.ssh/ec2_key.pem
-          chmod 600 ~/.ssh/ec2_key.pem
-          # Verify key format
-          ssh-keygen -l -f ~/.ssh/ec2_key.pem || {
-            echo "⚠️  SSH key format issue - checking first line:"
-            head -1 ~/.ssh/ec2_key.pem
-            echo "❌ SSH key must be in OpenSSH or RSA format"
-            exit 1
-          }
-          # Add EC2 to known_hosts
-          ssh-keyscan -H ${{ secrets.EC2_HOST || '16.16.89.200' }} >> ~/.ssh/known_hosts 2>/dev/null || true
-          # Start SSH tunnel in background (forwards localhost:6443 to EC2:localhost:6443)
-          ssh -f -N -o StrictHostKeyChecking=no \
-            -i ~/.ssh/ec2_key.pem \
-            -L 6443:localhost:6443 \
-            ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST || '16.16.89.200' }}
-          sleep 2
-          # Verify tunnel is running
-          if ps aux | grep -q "[s]sh.*6443:localhost:6443"; then
-            echo "✅ SSH tunnel started to ${{ secrets.EC2_HOST || '16.16.89.200' }}:6443"
-          else
-            echo "❌ SSH tunnel failed to start"
-            exit 1
-          fi
-
-      - name: Set up Kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-          
-          # Verify certificates are embedded (not file paths)
-          if kubectl config view --raw | grep -q "certificate-authority-data\|client-certificate-data"; then
-            echo "✅ Kubeconfig has embedded certificates"
-          else
-            echo "❌ ERROR: Kubeconfig has file path references!"
-            echo "   Run ./k8s/fix-kubeconfig-complete.sh on EC2 and update KUBE_CONFIG secret"
-            kubectl config view --raw | grep -E "certificate-authority|client-certificate|client-key" || true
-            exit 1
-          fi
-          
-          # Replace cluster server to use localhost tunnel
-          sed -i 's|server:.*|server: https://127.0.0.1:6443|g' $HOME/.kube/config
-          echo "✅ Kubeconfig updated to use SSH tunnel (127.0.0.1:6443)"
-          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' || echo "⚠️  Could not read cluster server"
-          echo ""
-
-      - name: Verify cluster connection
-        run: |
-          echo "🔌 Attempting to connect to cluster through SSH tunnel..."
-          kubectl cluster-info && kubectl get nodes || {
-            echo "❌ Failed to connect to cluster"
+      - name: Deploy on EC2 Minikube
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST || '16.16.89.200' }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "🔧 Running kubectl inside EC2 where Minikube is accessible..."
+            
+            # Navigate to k8s directory
+            cd /tmp/movieapp-k8s/k8s || { echo "❌ k8s directory not found"; exit 1; }
+            
+            # Verify Minikube is running
+            echo "🔍 Checking Minikube status..."
+            if ! minikube status > /dev/null 2>&1; then
+              echo "❌ Minikube is not running!"
+              echo "   Starting Minikube..."
+              minikube start --apiserver-ips=127.0.0.1 --apiserver-port=6443 || exit 1
+            fi
+            
+            # Verify cluster connection
+            echo "🔌 Verifying cluster connection..."
+            kubectl cluster-info && kubectl get nodes || {
+              echo "❌ Failed to connect to Minikube cluster"
+              exit 1
+            }
+            
+            # Use latest images
+            BACKEND_IMAGE="${{ env.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}:latest"
+            FRONTEND_IMAGE="${{ env.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}:latest"
+            
+            echo "📦 Using images:"
+            echo "   Backend: $BACKEND_IMAGE"
+            echo "   Frontend: $FRONTEND_IMAGE"
+            
+            # Update deployment images
+            echo "📝 Updating deployment images..."
+            sed -i "s|image:.*movieapp-backend.*|image: $BACKEND_IMAGE|g" deployment-backend.yaml
+            sed -i "s|image:.*movieapp-frontend.*|image: $FRONTEND_IMAGE|g" deployment-frontend.yaml
+            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" deployment-backend.yaml
+            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" deployment-frontend.yaml
+            
+            # Create namespace if not exists
+            echo "📦 Creating namespace..."
+            kubectl create namespace movieapp --dry-run=client -o yaml | kubectl apply -f -
+            
+            # Apply ConfigMaps
+            echo "📝 Applying ConfigMaps..."
+            kubectl apply -f configmap-nginx.yaml
+            kubectl apply -f configmap-frontend-env.yaml
+            kubectl apply -f configmap-frontend-script.yaml
+            
+            # Apply Secrets
+            echo "🔐 Applying Secrets..."
+            kubectl apply -f secret-backend.yaml
+            
+            # Deploy Backend
+            echo "🚀 Deploying Backend..."
+            kubectl apply -f deployment-backend.yaml
+            kubectl apply -f service-backend.yaml
+            
+            # Deploy Frontend
+            echo "🚀 Deploying Frontend..."
+            kubectl apply -f deployment-frontend.yaml
+            kubectl apply -f service-frontend.yaml
+            
+            # Wait for deployments
+            echo "⏳ Waiting for deployments..."
+            kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n movieapp || true
+            kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n movieapp || true
+            
+            # Show status
             echo ""
-            echo "🔍 Troubleshooting:"
-            echo "1. Check if SSH tunnel is running: ps aux | grep ssh"
-            echo "2. Verify EC2_HOST and EC2_USER secrets are set"
-            echo "3. Ensure EC2 security group allows SSH (port 22)"
-            echo "4. Make sure Minikube is running on EC2"
-            echo "5. Check if Minikube API server is listening on localhost:6443"
-            exit 1
-          }
-
-      - name: Update deployment images
-        run: |
-          sed -i "s|image:.*movieapp-backend.*|image: ${{ env.DOCKER_USERNAME }}/${{ env.BACKEND_IMAGE }}:latest|g" k8s/deployment-backend.yaml
-          sed -i "s|image:.*movieapp-frontend.*|image: ${{ env.DOCKER_USERNAME }}/${{ env.FRONTEND_IMAGE }}:latest|g" k8s/deployment-frontend.yaml
-          sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" k8s/deployment-backend.yaml
-          sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|g" k8s/deployment-frontend.yaml
-
-      - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/configmap-nginx.yaml
-          kubectl apply -f k8s/configmap-frontend-env.yaml
-          kubectl apply -f k8s/configmap-frontend-script.yaml
-          kubectl apply -f k8s/secret-backend.yaml
-          kubectl apply -f k8s/deployment-backend.yaml
-          kubectl apply -f k8s/service-backend.yaml
-          kubectl apply -f k8s/deployment-frontend.yaml
-          kubectl apply -f k8s/service-frontend.yaml
-
-      - name: Wait for deployments
-        run: |
-          kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n movieapp || true
-          kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n movieapp || true
-
-      - name: Show deployment status
-        run: |
-          kubectl get pods -n movieapp
-          kubectl get services -n movieapp
-
-      - name: Cleanup SSH tunnel
-        if: always()
-        run: |
-          echo "🧹 Cleaning up SSH tunnel..."
-          pkill -f "ssh.*6443:localhost:6443" || true
-          echo "✅ SSH tunnel closed"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📊 Deployment Status:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "=== Pods ==="
+            kubectl get pods -n movieapp
+            echo ""
+            echo "=== Services ==="
+            kubectl get services -n movieapp
+            echo ""
+            echo "=== Deployments ==="
+            kubectl get deployments -n movieapp
+            echo ""
+            echo "✅ Deployment complete!"
 
