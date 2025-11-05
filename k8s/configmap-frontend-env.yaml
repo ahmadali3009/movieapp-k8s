@@ -5,6 +5,6 @@ metadata:
   namespace: movieapp
 data:
   APP_ENV: "production"
-  # API_URL will be set via backend service name
-  API_URL: "http://backend-service:5000"
+  # API_URL for external access (browser needs external URL)
+  API_URL: "http://16.16.89.200:31461"
 
