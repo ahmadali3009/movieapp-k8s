@@ -45,8 +45,17 @@ jobs:
       - name: Set up SSH tunnel to EC2
         run: |
           mkdir -p ~/.ssh
+          # Write SSH key and normalize line endings
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key.pem
+          sed -i 's/\r$//' ~/.ssh/ec2_key.pem
           chmod 600 ~/.ssh/ec2_key.pem
+          # Verify key format
+          ssh-keygen -l -f ~/.ssh/ec2_key.pem || {
+            echo "⚠️  SSH key format issue - checking first line:"
+            head -1 ~/.ssh/ec2_key.pem
+            echo "❌ SSH key must be in OpenSSH or RSA format"
+            exit 1
+          }
           # Add EC2 to known_hosts
           ssh-keyscan -H ${{ secrets.EC2_HOST || '16.16.89.200' }} >> ~/.ssh/known_hosts 2>/dev/null || true
           # Start SSH tunnel in background (forwards localhost:6443 to EC2:localhost:6443)
@@ -55,7 +64,13 @@ jobs:
             -L 6443:localhost:6443 \
             ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST || '16.16.89.200' }}
           sleep 2
-          echo "✅ SSH tunnel started to ${{ secrets.EC2_HOST || '16.16.89.200' }}:6443"
+          # Verify tunnel is running
+          if ps aux | grep -q "[s]sh.*6443:localhost:6443"; then
+            echo "✅ SSH tunnel started to ${{ secrets.EC2_HOST || '16.16.89.200' }}:6443"
+          else
+            echo "❌ SSH tunnel failed to start"
+            exit 1
+          fi
 
       - name: Set up Kubeconfig
         run: |
