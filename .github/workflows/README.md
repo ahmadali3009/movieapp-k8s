@@ -120,6 +120,10 @@ env:
 - Verify `KUBE_CONFIG` secret is valid and base64 encoded
 - Check cluster connectivity: `kubectl cluster-info`
 - Ensure namespace exists: `kubectl get namespace movieapp`
+- **For Minikube on EC2**: See [MINIKUBE_EC2_SETUP.md](./MINIKUBE_EC2_SETUP.md)
+  - Elastic IP: `16.16.89.200`
+  - Run setup script: `k8s/setup-minikube-ec2.sh`
+  - Ensure EC2 security group allows port 6443
 
 ### EC2 Deployment Failed
 - Verify SSH key format (should be private key)

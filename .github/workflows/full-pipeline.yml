@@ -123,9 +123,20 @@ jobs:
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
+          # Debug: Show cluster server (without sensitive data)
+          echo "🔍 Checking kubeconfig..."
+          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' || echo "⚠️  Could not read cluster server"
+          echo ""
 
       - name: Verify cluster connection
-        run: kubectl cluster-info && kubectl get nodes
+        run: |
+          echo "🔌 Attempting to connect to cluster..."
+          kubectl cluster-info && kubectl get nodes || {
+            echo "❌ Failed to connect to cluster"
+            echo "⚠️  Make sure your kubeconfig points to a remote/cloud cluster, not a local Docker Desktop cluster"
+            echo "💡 The cluster server should be a public URL (e.g., https://xxx.xxx.xxx.xxx or https://xxx.eks.amazonaws.com)"
+            exit 1
+          }
 
       - name: Update deployment images
         run: |

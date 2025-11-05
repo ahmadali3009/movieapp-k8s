@@ -13,7 +13,8 @@ on:
           - staging
       ec2_host:
         description: 'EC2 host IP or hostname'
-        required: true
+        required: false
+        default: '16.16.89.200'
       ec2_user:
         description: 'EC2 SSH user (e.g., ec2-user, ubuntu)'
         required: true
@@ -23,6 +24,7 @@ env:
   DOCKER_USERNAME: ahmedbutt3009
   BACKEND_IMAGE: movieapp-backend
   FRONTEND_IMAGE: movieapp-frontend
+  EC2_ELASTIC_IP: 16.16.89.200
 
 jobs:
   deploy-ec2:
