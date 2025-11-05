@@ -153,6 +153,17 @@ jobs:
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
+          
+          # Verify certificates are embedded (not file paths)
+          if kubectl config view --raw | grep -q "certificate-authority-data\|client-certificate-data"; then
+            echo "✅ Kubeconfig has embedded certificates"
+          else
+            echo "❌ ERROR: Kubeconfig has file path references!"
+            echo "   Run ./k8s/fix-kubeconfig-complete.sh on EC2 and update KUBE_CONFIG secret"
+            kubectl config view --raw | grep -E "certificate-authority|client-certificate|client-key" || true
+            exit 1
+          fi
+          
           # Replace cluster server to use localhost tunnel
           sed -i 's|server:.*|server: https://127.0.0.1:6443|g' $HOME/.kube/config
           echo "✅ Kubeconfig updated to use SSH tunnel (127.0.0.1:6443)"
