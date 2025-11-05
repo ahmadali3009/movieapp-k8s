@@ -25,21 +25,21 @@ echo ""
 echo "🛑 Stopping Minikube (if running)..."
 minikube stop || true
 
-# Start Minikube with Elastic IP binding
+# Start Minikube with localhost binding (for SSH tunnel from GitHub Actions)
 echo ""
-echo "▶️  Starting Minikube with Elastic IP: $ELASTIC_IP"
+echo "▶️  Starting Minikube with localhost binding (for SSH tunnel)..."
 minikube start \
-  --apiserver-ips=$ELASTIC_IP \
+  --apiserver-ips=127.0.0.1 \
   --apiserver-port=6443 \
-  --extra-config=apiserver.advertise-address=$ELASTIC_IP
+  --extra-config=apiserver.advertise-address=127.0.0.1
 
 # Wait a moment for Minikube to be ready
 sleep 5
 
-# Update kubeconfig to use Elastic IP
+# Update kubeconfig (GitHub Actions will override to use SSH tunnel)
 echo ""
-echo "⚙️  Updating kubeconfig to use Elastic IP..."
-kubectl config set-cluster minikube --server=https://$ELASTIC_IP:6443
+echo "⚙️  Kubeconfig configured (GitHub Actions will use SSH tunnel)..."
+kubectl config set-cluster minikube --server=https://127.0.0.1:6443
 
 # Verify configuration
 echo ""
@@ -71,11 +71,16 @@ echo "2. Update GitHub secret:"
 echo "   - Go to GitHub → Settings → Secrets → Actions"
 echo "   - Update KUBE_CONFIG with the base64 string"
 echo ""
-echo "3. Open EC2 Security Group:"
-echo "   - Allow inbound port 6443 (TCP) from 0.0.0.0/0"
-echo "   - Or restrict to GitHub Actions IP ranges"
+echo "3. Configure GitHub Secrets:"
+echo "   - EC2_HOST = $ELASTIC_IP"
+echo "   - EC2_USER = ubuntu"
+echo "   - EC2_SSH_KEY = Your SSH private key"
+echo "   - KUBE_CONFIG = Base64 kubeconfig (from step 1)"
 echo ""
-echo "4. Test deployment:"
+echo "4. EC2 Security Group:"
+echo "   - Only needs SSH (port 22) - no need for port 6443!"
+echo ""
+echo "5. Test deployment:"
 echo "   - Push to master branch, or"
 echo "   - Manually trigger 'Deploy to Kubernetes' workflow"
 echo ""

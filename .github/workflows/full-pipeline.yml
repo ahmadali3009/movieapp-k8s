@@ -118,23 +118,44 @@ jobs:
       - name: Configure kubectl
         uses: azure/setup-kubectl@v3
 
+      - name: Set up SSH tunnel to EC2
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key.pem
+          chmod 600 ~/.ssh/ec2_key.pem
+          # Add EC2 to known_hosts
+          ssh-keyscan -H ${{ secrets.EC2_HOST || '16.16.89.200' }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          # Start SSH tunnel in background (forwards localhost:6443 to EC2:localhost:6443)
+          ssh -f -N -o StrictHostKeyChecking=no \
+            -i ~/.ssh/ec2_key.pem \
+            -L 6443:localhost:6443 \
+            ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST || '16.16.89.200' }}
+          sleep 2
+          echo "✅ SSH tunnel started to ${{ secrets.EC2_HOST || '16.16.89.200' }}:6443"
+
       - name: Set up Kubeconfig
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
-          # Debug: Show cluster server (without sensitive data)
-          echo "🔍 Checking kubeconfig..."
+          # Replace cluster server to use localhost tunnel
+          sed -i 's|server:.*|server: https://127.0.0.1:6443|g' $HOME/.kube/config
+          echo "✅ Kubeconfig updated to use SSH tunnel (127.0.0.1:6443)"
           kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' || echo "⚠️  Could not read cluster server"
           echo ""
 
       - name: Verify cluster connection
         run: |
-          echo "🔌 Attempting to connect to cluster..."
+          echo "🔌 Attempting to connect to cluster through SSH tunnel..."
           kubectl cluster-info && kubectl get nodes || {
             echo "❌ Failed to connect to cluster"
-            echo "⚠️  Make sure your kubeconfig points to a remote/cloud cluster, not a local Docker Desktop cluster"
-            echo "💡 The cluster server should be a public URL (e.g., https://xxx.xxx.xxx.xxx or https://xxx.eks.amazonaws.com)"
+            echo ""
+            echo "🔍 Troubleshooting:"
+            echo "1. Check if SSH tunnel is running: ps aux | grep ssh"
+            echo "2. Verify EC2_HOST and EC2_USER secrets are set"
+            echo "3. Ensure EC2 security group allows SSH (port 22)"
+            echo "4. Make sure Minikube is running on EC2"
+            echo "5. Check if Minikube API server is listening on localhost:6443"
             exit 1
           }
 
@@ -166,4 +187,11 @@ jobs:
         run: |
           kubectl get pods -n movieapp
           kubectl get services -n movieapp
+
+      - name: Cleanup SSH tunnel
+        if: always()
+        run: |
+          echo "🧹 Cleaning up SSH tunnel..."
+          pkill -f "ssh.*6443:localhost:6443" || true
+          echo "✅ SSH tunnel closed"
 
