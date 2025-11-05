@@ -66,7 +66,7 @@ function App() {
   const { data: searchData, error: searchError, isLoading: searchIsLoading, refetch } = useQuery({
     queryKey: ['search', searchTerm], // Use searchTerm as key
     queryFn: searchFetch,
-    enabled: !!searchTerm, // Disable automatic fetching
+    enabled: !!searchTerm, // Disable automatic fetchings
   });
   useEffect(() => {
     if (searchTerm) {
