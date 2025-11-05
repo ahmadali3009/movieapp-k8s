@@ -43,7 +43,7 @@ function App() {
   //   console.log("value", value)
   //   setsearch(value)
   //
-  // }
+  // ss }
   let handlepage = () => {
     let nextpage = data?.data.page + 1
     setpage(nextpage)
