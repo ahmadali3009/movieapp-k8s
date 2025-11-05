@@ -42,7 +42,7 @@ function App() {
   // let handlesearch = (value: string) => {
   //   console.log("value", value)
   //   setsearch(value)
-
+  //
   // }
   let handlepage = () => {
     let nextpage = data?.data.page + 1
